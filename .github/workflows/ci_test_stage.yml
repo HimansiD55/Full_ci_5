@@ -64,15 +64,17 @@ jobs:
         
       - name: Create artifact
         run: |
-           tar -czf app.tar.gz node_modules index.js package.json
+           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+           ARTIFACT_NAME="app-${SHORT_SHA}.tar.gz"
+           tar -czf $ARTIFACT_NAME node_modules index.js package.json
+           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
            
       - name: Upload artifect
         uses: actions/upload-artifact@v4
         with:
-            name: node-app-build
-            path: app.tar.gz
+             name: build-artifact
+             path: ${{ env.ARTIFACT_NAME }}
           
-
-      - name: Build Step
-        run: echo "Build successful 🚀"
+      - name: Print artifact name
+        run: 'echo "✅ Created artifact: $ARTIFACT_NAME"'
        
