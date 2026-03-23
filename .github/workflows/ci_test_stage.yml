@@ -107,8 +107,7 @@ jobs:
             cd /home/$USER/app
             ARCHIVE=$(ls *.tar.gz | head -1)
             tar -xzf "$ARCHIVE"
-            npm install
-            npm start
+            nohup npm start > app.log 2>&1 &
           EOF
           
          
