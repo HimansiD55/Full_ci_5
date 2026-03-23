@@ -105,7 +105,8 @@ jobs:
           ssh -i ~/.ssh/id_rsa \
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
             cd /home/$USER/app
-            tar -xzf *.tar.gz
+            ARCHIVE=$(ls *.tar.gz | head -1)
+            tar -xzf "$ARCHIVE"
             npm install
             npm start
           EOF
