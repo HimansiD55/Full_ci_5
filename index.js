@@ -1,24 +1,4 @@
-const express = require('express');
-const app = express();
-const { version } = require('./package.json');
 
-app.get('/', (req, res) => {
-  res.send('Hello World')
-});
-
-app.get('/crash', (req, res) => {
-  const config = require('./config.json')  // ← only crashes when THIS route is hit
-  res.json(config)
-});
-
-app.listen(3000, () => {
-  console.log('Server running on port 3000')
-})
-
-module.exports = app;
-
-
-     /* 
       const express = require('express');
       const app = express();
       
@@ -41,4 +21,4 @@ module.exports = app;
           console.log(`Server running on port ${PORT}`);
           });
         }
-*/
+
