@@ -105,7 +105,7 @@ jobs:
           ssh -i ~/.ssh/id_rsa \
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
             cd /home/$USER/app
-            tar -xzf build-artifact.tar.gz
+            tar -xzf *.tar.gz
             npm install
             npm start
           EOF
