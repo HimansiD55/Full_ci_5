@@ -13,7 +13,11 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ version: version });
 });
+/ break it intentionally
+throw new Error("intentional break for testing")
 
+// or just write invalid code
+this is broken code!!!
 // Export app for testing
 module.exports = app;
 
