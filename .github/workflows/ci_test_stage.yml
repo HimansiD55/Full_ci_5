@@ -107,7 +107,11 @@ jobs:
             cd /home/$USER/app
             ARCHIVE=$(ls *.tar.gz | head -1)
             tar -xzf "$ARCHIVE"
-            nohup npm start > app.log 2>&1 &
+            if pm2 list | grep -q "my-node-app"; then
+              pm2 restart my-node-app
+            else
+              pm2 start index.js --name my-node-app
+            fi
           EOF
           
          
