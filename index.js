@@ -1,36 +1,44 @@
 const express = require('express');
 const app = express();
-
-// Load version from package.json
 const { version } = require('./package.json');
 
-// Root endpoint
 app.get('/', (req, res) => {
-//  res.json({ status: "ok" });
   res.send('Hello World')
 });
 
-// this looks like valid code ✅
-// but crashes immediately when node runs it ❌
-const config = require('./config.json')  // file doesn't exist!
+app.get('/crash', (req, res) => {
+  const config = require('./config.json')  // ← only crashes when THIS route is hit
+  res.json(config)
+});
 
 app.listen(3000, () => {
   console.log('Server running on port 3000')
 })
 
+module.exports = app;
 
-// Health endpoint
-     /* app.get('/health', (req, res) => {
+
+     /* 
+      const express = require('express');
+      const app = express();
+      
+      const { version } = require('./package.json');
+      
+      app.get('/', (req, res) => {
+        res.json({ status: "ok" });
+      });
+      // Health endpoint
+      app.get('/health', (req, res) => {
         res.json({ version: version });
       });
-      // Export app for testing
-      module.exports = app;
       
-      // Start server only if run directly
+      module.exports = app; // 👈 important for testing
+      
+      // Only run server if not in test
       if (require.main === module) {
         const PORT = 3000;
         app.listen(PORT, () => {
           console.log(`Server running on port ${PORT}`);
-        });
-      }
+          });
+        }
 */
