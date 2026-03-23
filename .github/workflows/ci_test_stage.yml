@@ -4,7 +4,8 @@ on:
   push:
     branches: [ main ]
   pull_request:
-
+  workflow_dispatch:
+  
 jobs:
 
   lint:
@@ -105,13 +106,23 @@ jobs:
           ssh -i ~/.ssh/id_rsa \
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
             cd /home/$USER/app
-            ARCHIVE=$(ls *.tar.gz | head -1)
-            tar -xzf "$ARCHIVE"
-            if pm2 list | grep -q "my-node-app"; then
-              pm2 restart my-node-app
-            else
-              pm2 start index.js --name my-node-app
+            
+             # keep only last 2 archives, delete older ones
+             #ls -t *.tar.gz | tail -n +3 | xargs rm -f
+             
+            
+            PREVIOUS=$(ls -t *.tar.gz | sed -n '2p')
+            if [ -z "$PREVIOUS" ]; then
+              echo "❌ No previous archive found to rollback!"
+              exit 1
             fi
+            
+            echo "🔄 Rolling back to $PREVIOUS"
+            tar -xzf "$PREVIOUS"
+            
+            pm2 restart my-node-app
+            echo "✅ Rollback complete"
+            
           EOF
           
          
