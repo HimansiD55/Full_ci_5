@@ -9,8 +9,8 @@
       });
       // Health endpoint
       app.get('/health', (req, res) => {
-          res.send("Version 1");  
-        //res.json({ version: version });
+           
+        res.json({ version: version });
       });
       
       module.exports = app; // 👈 important for testing
