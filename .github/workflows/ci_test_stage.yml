@@ -132,7 +132,7 @@ jobs:
       
           echo "🔍 Checking app stability"
       
-          RESTARTS=$(pm2 list | grep my-node-app | awk '{print $8}')
+          RESTARTS=$(pm2 jlist | grep -A 10 '"name":"my-node-app"' | grep '"restart_time"' | head -1 | grep -o '[0-9]*')
           echo "🔁 Restart count: $RESTARTS"
       
           if [ "$RESTARTS" -gt 5 ]; then
