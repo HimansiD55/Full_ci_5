@@ -132,8 +132,17 @@ jobs:
       
           echo "🔍 Checking app stability"
       
-          RESTARTS=$(pm2 jlist | grep -A 10 '"name":"my-node-app"' | grep '"restart_time"' | head -1 | grep -o '[0-9]*')
-          echo "🔁 Restart count: $RESTARTS"
+            RESTARTS=$(pm2 jlist | node -e "
+            let data='';
+            process.stdin.on('data', chunk => data += chunk);
+            process.stdin.on('end', () => {
+              const apps = JSON.parse(data);
+              const app = apps.find(a => a.name === 'my-node-app');
+              console.log(app ? app.pm2_env.restart_time : 0);
+            });
+            ")
+
+              echo "🔁 Restart count: $RESTARTS"
       
           if [ "$RESTARTS" -gt 5 ]; then
             echo "❌ App is unstable! Rolling back..."
