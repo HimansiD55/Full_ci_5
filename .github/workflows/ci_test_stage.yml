@@ -120,8 +120,14 @@ jobs:
             echo "🔄 Rolling back to $PREVIOUS"
             tar -xzf "$PREVIOUS"
             
-            pm2 restart my-node-app
-            echo "✅ Rollback complete"
+            if pm2 list | grep -q "my-node-app"; then
+              echo "🔁 Restarting app"
+              pm2 restart my-node-app
+            else
+              echo "🚀 Starting app"
+              pm2 start app.js --name my-node-app
+             fi
+                      echo "✅ Rollback complete"
             
           EOF
           
