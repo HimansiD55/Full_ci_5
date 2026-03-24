@@ -167,7 +167,7 @@ jobs:
             fi
           ENDSSH
   notify:
-      needs: deploy
+      needs: [lint, test, build, deploy]
       if: always()
       runs-on: ubuntu-latest
       steps:
@@ -192,7 +192,10 @@ jobs:
             Branch     : ${{ github.ref_name }}
             Commit     : ${{ github.sha }}
             Triggered  : ${{ github.actor }}
+            Lint   : ${{ needs.lint.result }}
             
+            Test   : ${{ needs.test.result }}
+            Build  : ${{ needs.build.result }}
             Deploy     : ${{ needs.deploy.result }}
             
             ${{ needs.deploy.result == 'failure' && 'NOTE: App was unstable. Automatic rollback was triggered inside deploy job.' || '' }}
