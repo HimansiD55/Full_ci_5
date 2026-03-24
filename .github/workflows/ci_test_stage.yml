@@ -105,6 +105,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa \
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
+          set -e
             cd /home/$USER/app
             
              echo "📦 Extracting latest artifact"
@@ -114,38 +115,45 @@ jobs:
           # install deps (safe)
           npm install --production
     
-          # start or restart app
+          echo "🚀 Resetting PM2 restart count"
+          pm2 reset my-node-app || true
+      
+          echo "🚀 Starting or Restarting app"
           if pm2 list | grep -q "my-node-app"; then
-            echo "🔁 Restarting app"
             pm2 restart my-node-app
           else
-            echo "🚀 Starting app"
             pm2 start index.js --name my-node-app
           fi
-
-           pm2 save 
-           
-          # wait for app to stabilize
+      
+          pm2 save
+      
+          echo "⏳ Waiting for app to stabilize..."
           sleep 10
-    
-          echo "🔍 Checking app status"
-          if pm2 list | grep -q "online"; then
-            echo "✅ Deployment successful"
-          else
-            echo "❌ Deployment failed! Rolling back..."
-  
+      
+          echo "🔍 Checking app stability"
+      
+          RESTARTS=$(pm2 list | grep my-node-app | awk '{print $8}')
+          echo "🔁 Restart count: $RESTARTS"
+      
+          if [ "$RESTARTS" -gt 5 ]; then
+            echo "❌ App is unstable! Rolling back..."
+      
             PREVIOUS=$(ls -t *.tar.gz | sed -n '2p')
-  
+      
             if [ -z "$PREVIOUS" ]; then
               echo "❌ No previous version found!"
               exit 1
             fi
-  
+      
             echo "🔄 Rolling back to $PREVIOUS"
             tar -xzf "$PREVIOUS"
-  
+      
             pm2 restart my-node-app
+      
             echo "✅ Rollback complete"
-           fi
-          EOF
+            exit 1
+          else
+            echo "✅ Deployment successful and stable"
+          fi
+          EOF 
              
