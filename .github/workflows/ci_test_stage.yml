@@ -104,7 +104,7 @@ jobs:
       - name: Deploy on server
         run: |
           ssh -i ~/.ssh/id_rsa \
-          ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
+          ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'ENDSSH'
           
             cd /home/$USER/app
             
@@ -161,9 +161,9 @@ jobs:
             
       
             echo "✅ Rollback complete"
-            exit 1
-          else
-            echo "✅ Deployment successful and stable"
-          fi
-          EOF 
+              exit 1
+            else
+              echo "✅ Deployment successful and stable"
+            fi
+          ENDSSH
              
