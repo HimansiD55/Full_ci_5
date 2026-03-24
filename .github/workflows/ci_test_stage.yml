@@ -126,7 +126,7 @@ jobs:
            pm2 save 
            
           # wait for app to stabilize
-          sleep 5
+          sleep 10
     
           echo "🔍 Checking app status"
           if pm2 list | grep -q "online"; then
