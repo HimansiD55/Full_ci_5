@@ -166,4 +166,36 @@ jobs:
               echo "✅ Deployment successful and stable"
             fi
           ENDSSH
-             
+  notify:
+      needs: deploy
+      if: always()
+      runs-on: ubuntu-latest
+      steps:
+      - name: Send email
+        uses:  dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          to: ${{ secrets.EMAIL_TO }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          subject: >
+            ${{
+              needs.deploy.result == 'success' && '[SUCCESS] Deploy' ||
+              needs.deploy.result == 'failure' && '[FAILED] Deploy — Rollback may have triggered' ||
+              '[CANCELLED] Deploy'
+            }} — ${{ github.repository }}
+          body: |
+            Repository : ${{ github.repository }}
+            Branch     : ${{ github.ref_name }}
+            Commit     : ${{ github.sha }}
+            Triggered  : ${{ github.actor }}
+            
+            Deploy     : ${{ needs.deploy.result }}
+            
+            ${{ needs.deploy.result == 'failure' && 'NOTE: App was unstable. Automatic rollback was triggered inside deploy job.' || '' }}
+            
+            Pipeline   : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
