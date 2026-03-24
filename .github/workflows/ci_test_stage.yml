@@ -107,28 +107,45 @@ jobs:
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
             cd /home/$USER/app
             
-             # keep only last 2 archives, delete older ones
-             #ls -t *.tar.gz | tail -n +3 | xargs rm -f
-             
-            
+             echo "📦 Extracting latest artifact"
+              LATEST=$(ls -t *.tar.gz | head -1)
+              tar -xzf "$LATEST"
+    
+          # install deps (safe)
+          npm install --production
+    
+          # start or restart app
+          if pm2 list | grep -q "my-node-app"; then
+            echo "🔁 Restarting app"
+            pm2 restart my-node-app
+          else
+            echo "🚀 Starting app"
+            pm2 start index.js --name my-node-app
+          fi
+
+           pm2 save 
+           
+          # wait for app to stabilize
+          sleep 5
+    
+          echo "🔍 Checking app status"
+          if pm2 list | grep -q "online"; then
+            echo "✅ Deployment successful"
+          else
+            echo "❌ Deployment failed! Rolling back..."
+  
             PREVIOUS=$(ls -t *.tar.gz | sed -n '2p')
+  
             if [ -z "$PREVIOUS" ]; then
-              echo "❌ No previous archive found to rollback!"
+              echo "❌ No previous version found!"
               exit 1
             fi
-            
+  
             echo "🔄 Rolling back to $PREVIOUS"
             tar -xzf "$PREVIOUS"
-            
-            if pm2 list | grep -q "my-node-app"; then
-              echo "🔁 Restarting app"
-              pm2 restart my-node-app
-            else
-              echo "🚀 Starting app"
-              pm2 start app.js --name my-node-app
-             fi
-                      echo "✅ Rollback complete"
-            
+  
+            pm2 restart my-node-app
+            echo "✅ Rollback complete"
+           fi
           EOF
-          
-         
+             
