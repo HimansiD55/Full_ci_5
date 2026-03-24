@@ -21,10 +21,7 @@
         app.listen(PORT, () => {
           console.log(`Server running on port ${PORT}`);
 
-          setTimeout(() => {
-            console.log("💥 Simulating crash...");
-            process.exit(1);
-          }, 3000);    
+   
           });
         }
 
