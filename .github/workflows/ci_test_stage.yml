@@ -105,7 +105,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa \
           ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'EOF'
-          set -e
+          
             cd /home/$USER/app
             
              echo "📦 Extracting latest artifact"
@@ -128,7 +128,7 @@ jobs:
           pm2 save
       
           echo "⏳ Waiting for app to stabilize..."
-          sleep 10
+          sleep 15
       
           echo "🔍 Checking app stability"
       
@@ -144,7 +144,7 @@ jobs:
 
               echo "🔁 Restart count: $RESTARTS"
       
-          if [ "$RESTARTS" -gt 5 ]; then
+          if [ "$RESTARTS" -gt 2 ]; then
             echo "❌ App is unstable! Rolling back..."
       
             PREVIOUS=$(ls -t *.tar.gz | sed -n '2p')
@@ -156,8 +156,9 @@ jobs:
       
             echo "🔄 Rolling back to $PREVIOUS"
             tar -xzf "$PREVIOUS"
-      
-            pm2 restart my-node-app
+            npm install --production        # ← reinstall deps for old version too
+            pm2 restart my-node-app 
+            
       
             echo "✅ Rollback complete"
             exit 1
