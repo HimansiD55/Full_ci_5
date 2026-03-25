@@ -105,60 +105,77 @@ jobs:
             echo "🚀 Starting Deployment: $TIMESTAMP"
             mkdir -p $RELEASES_DIR
 
-            # 2. SAVE PREVIOUS VERSION PATH (For Rollback)
-            # We check where the 'current' symlink points right now
-            PREVIOUS_RELEASE=$(readlink -f $CURRENT_SYMLINK || echo "")
+            # 2. SAVE PREVIOUS VERSION PATH
+            # We use 'readlink' but check if it's a real directory
+            PREVIOUS_RELEASE=$(readlink -f $CURRENT_SYMLINK)
+            if [ "$PREVIOUS_RELEASE" == "$CURRENT_SYMLINK" ] || [ ! -d "$PREVIOUS_RELEASE" ]; then
+                PREVIOUS_RELEASE=""
+                echo "ℹ️ No valid previous release found. This might be the first deploy."
+            fi
 
-            # 3. UNPACK NEW CODE INTO TIMESTAMPED FOLDER
+            # 3. UNPACK THE LATEST TARBALL ONLY
             mkdir -p $NEW_RELEASE_PATH
-            # Move the uploaded tar to the app root if it's not there
-            tar -xzf $APP_ROOT/*.tar.gz -C $NEW_RELEASE_PATH
+            # FIX: We find the most RECENTLY uploaded tar file only
+            LATEST_TAR=$(ls -t $APP_ROOT/*.tar.gz | head -1)
             
-            echo "📦 Installing dependencies in $NEW_RELEASE_PATH"
-            cd $NEW_RELEASE_PATH
-            npm install --production
+            if [ -z "$LATEST_TAR" ]; then
+                echo "❌ Error: No tarball found in $APP_ROOT"
+                exit 1
+            fi
 
-            # 4. ATOMIC SWITCH (Point 'current' to the new version)
+            echo "📦 Extracting $LATEST_TAR to $NEW_RELEASE_PATH"
+            tar -xzf "$LATEST_TAR" -C "$NEW_RELEASE_PATH"
+            
+            echo "📦 Installing dependencies..."
+            cd $NEW_RELEASE_PATH
+            # Using --omit=dev as requested by your npm logs
+            npm install --omit=dev --no-audit --no-fund
+
+            # 4. ATOMIC SWITCH
             echo "🔗 Switching Symlink..."
             ln -sfn $NEW_RELEASE_PATH $CURRENT_SYMLINK
 
             # 5. RESTART APP
-            # Point PM2 to the symlink path so it always stays consistent
+            # We use the absolute path to index.js to ensure PM2 finds it
+            echo "🚀 Starting/Restarting PM2..."
             pm2 restart my-node-app || pm2 start $CURRENT_SYMLINK/index.js --name my-node-app
             
-            # 6. HEALTH CHECK (The "Automatic" part)
+            # 6. HEALTH CHECK
             echo "⏳ Monitoring stability for 15 seconds..."
             sleep 15
 
-            # Check if app is 'online' and hasn't restarted more than twice
+            # Updated parsing logic to be more resilient
             RESTARTS=$(pm2 jlist | node -e "
-              const data = JSON.parse(require('fs').readFileSync(0));
-              const app = data.find(a => a.name === 'my-node-app');
-              process.stdout.write(app ? app.pm2_env.restart_time.toString() : '999');
+              try {
+                const data = JSON.parse(require('fs').readFileSync(0));
+                const app = data.find(a => a.name === 'my-node-app');
+                process.stdout.write(app ? app.pm2_env.restart_time.toString() : '999');
+              } catch (e) {
+                process.stdout.write('999');
+              }
             ")
 
             if [ "$RESTARTS" -lt 2 ]; then
                 echo "------------------------------------------------"
-                echo "✅ DEPLOYMENT SUCCESSFUL AND STABLE"
+                echo "✅ DEPLOYMENT SUCCESSFUL AT $(date)"
                 echo "------------------------------------------------"
-                # Keep only the last 5 releases to save disk space
+                # Cleanup: Keep only 5 releases, delete ALL tarballs to prevent the '*' error next time
                 ls -dt $RELEASES_DIR/* | tail -n +6 | xargs rm -rf
-                rm $APP_ROOT/*.tar.gz
+                rm -f $APP_ROOT/*.tar.gz
             else
                 echo "------------------------------------------------"
-                echo "🚨 ALERT: APP IS UNSTABLE! TRIGGERING ROLLBACK..."
+                echo "🚨 ALERT: ROLLBACK TRIGGERED AT $(date)"
                 echo "------------------------------------------------"
                 
-                if [ -n "$PREVIOUS_RELEASE" ] && [ "$PREVIOUS_RELEASE" != "$NEW_RELEASE_PATH" ]; then
+                if [ -n "$PREVIOUS_RELEASE" ]; then
                     echo "🔄 Reverting Symlink to: $PREVIOUS_RELEASE"
-                    ln -sfn $PREVIOUS_RELEASE $CURRENT_SYMLINK
+                    ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_SYMLINK"
                     pm2 restart my-node-app
-                    echo "✅ ROLLBACK COMPLETE: System reverted to last known stable version."
+                    echo "✅ ROLLBACK COMPLETE: Reverted to previous stable version."
                 else
-                    echo "❌ ROLLBACK FAILED: No previous stable release found!"
+                    echo "❌ ROLLBACK FAILED: No previous stable release to return to!"
+                    pm2 stop my-node-app || true
                 fi
-                
-                # Exit with 1 so GitHub Actions shows a red failure badge
                 exit 1
             fi
       
