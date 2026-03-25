@@ -82,90 +82,86 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
-  
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: build-artifact
-  
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
-  
-      - name: Copy artifact to server
-        run: |
-          scp -i ~/.ssh/id_rsa *.tar.gz \
-          ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }}:/home/${{ secrets.SSH_USERNAME }}/app/
-  
-      - name: Deploy on server
-        run: |
-          ssh -i ~/.ssh/id_rsa \
-          ${{ secrets.SSH_USERNAME }}@${{ secrets.SERVER_IP }} << 'ENDSSH'
-          
-            cd /home/$USER/app
+
+      - name: Deploy with Atomic Rollback
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # 1. SETUP VARIABLES
+            APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app"
+            RELEASES_DIR="$APP_ROOT/releases"
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            NEW_RELEASE_PATH="$RELEASES_DIR/$TIMESTAMP"
+            CURRENT_SYMLINK="$APP_ROOT/current"
+
+            echo "🚀 Starting Deployment: $TIMESTAMP"
+            mkdir -p $RELEASES_DIR
+
+            # 2. SAVE PREVIOUS VERSION PATH (For Rollback)
+            # We check where the 'current' symlink points right now
+            PREVIOUS_RELEASE=$(readlink -f $CURRENT_SYMLINK || echo "")
+
+            # 3. UNPACK NEW CODE INTO TIMESTAMPED FOLDER
+            mkdir -p $NEW_RELEASE_PATH
+            # Move the uploaded tar to the app root if it's not there
+            tar -xzf $APP_ROOT/*.tar.gz -C $NEW_RELEASE_PATH
             
-             echo "📦 Extracting latest artifact"
-              LATEST=$(ls -t *.tar.gz | head -1)
-              tar -xzf "$LATEST"
-    
-          # install deps (safe)
-          npm install --production
-    
-          echo "🚀 Resetting PM2 restart count"
-          pm2 reset my-node-app || true
-      
-          echo "🚀 Starting or Restarting app"
-          if pm2 list | grep -q "my-node-app"; then
-            pm2 restart my-node-app
-          else
-            pm2 start index.js --name my-node-app
-          fi
-      
-          pm2 save
-      
-          echo "⏳ Waiting for app to stabilize..."
-          sleep 15
-      
-          echo "🔍 Checking app stability"
-      
+            echo "📦 Installing dependencies in $NEW_RELEASE_PATH"
+            cd $NEW_RELEASE_PATH
+            npm install --production
+
+            # 4. ATOMIC SWITCH (Point 'current' to the new version)
+            echo "🔗 Switching Symlink..."
+            ln -sfn $NEW_RELEASE_PATH $CURRENT_SYMLINK
+
+            # 5. RESTART APP
+            # Point PM2 to the symlink path so it always stays consistent
+            pm2 restart my-node-app || pm2 start $CURRENT_SYMLINK/index.js --name my-node-app
+            
+            # 6. HEALTH CHECK (The "Automatic" part)
+            echo "⏳ Monitoring stability for 15 seconds..."
+            sleep 15
+
+            # Check if app is 'online' and hasn't restarted more than twice
             RESTARTS=$(pm2 jlist | node -e "
-            let data='';
-            process.stdin.on('data', chunk => data += chunk);
-            process.stdin.on('end', () => {
-              const apps = JSON.parse(data);
-              const app = apps.find(a => a.name === 'my-node-app');
-              console.log(app ? app.pm2_env.restart_time : 0);
-            });
+              const data = JSON.parse(require('fs').readFileSync(0));
+              const app = data.find(a => a.name === 'my-node-app');
+              process.stdout.write(app ? app.pm2_env.restart_time.toString() : '999');
             ")
 
-              echo "🔁 Restart count: $RESTARTS"
-      
-          if [ "$RESTARTS" -gt 2 ]; then
-            echo "❌ App is unstable! Rolling back..."
-      
-            PREVIOUS=$(ls -t *.tar.gz | sed -n '2p')
-      
-            if [ -z "$PREVIOUS" ]; then
-              echo "❌ No previous version found!"
-              exit 1
-            fi
-      
-            echo "🔄 Rolling back to $PREVIOUS"
-            tar -xzf "$PREVIOUS"
-            npm install --production        # ← reinstall deps for old version too
-            pm2 restart my-node-app 
-            
-      
-            echo "✅ Rollback complete"
-              exit 1
+            if [ "$RESTARTS" -lt 2 ]; then
+                echo "------------------------------------------------"
+                echo "✅ DEPLOYMENT SUCCESSFUL AND STABLE"
+                echo "------------------------------------------------"
+                # Keep only the last 5 releases to save disk space
+                ls -dt $RELEASES_DIR/* | tail -n +6 | xargs rm -rf
+                rm $APP_ROOT/*.tar.gz
             else
-              echo "✅ Deployment successful and stable"
+                echo "------------------------------------------------"
+                echo "🚨 ALERT: APP IS UNSTABLE! TRIGGERING ROLLBACK..."
+                echo "------------------------------------------------"
+                
+                if [ -n "$PREVIOUS_RELEASE" ] && [ "$PREVIOUS_RELEASE" != "$NEW_RELEASE_PATH" ]; then
+                    echo "🔄 Reverting Symlink to: $PREVIOUS_RELEASE"
+                    ln -sfn $PREVIOUS_RELEASE $CURRENT_SYMLINK
+                    pm2 restart my-node-app
+                    echo "✅ ROLLBACK COMPLETE: System reverted to last known stable version."
+                else
+                    echo "❌ ROLLBACK FAILED: No previous stable release found!"
+                fi
+                
+                # Exit with 1 so GitHub Actions shows a red failure badge
+                exit 1
             fi
-          ENDSSH
+      
   notify:
       needs: [lint, test, build, deploy]
       if: always()
