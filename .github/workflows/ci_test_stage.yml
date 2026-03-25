@@ -88,6 +88,17 @@ jobs:
         with:
           name: build-artifact
 
+      # STEP 1: UPLOAD THE FILE (Use scp-action)
+      - name: Copy artifact to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "*.tar.gz"
+          target: "/home/${{ secrets.SSH_USERNAME }}/app/"
+
+      # STEP 2: RUN THE DEPLOY SCRIPT (Use ssh-action)
       - name: Deploy with Atomic Rollback
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -95,7 +106,6 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. SETUP VARIABLES
             APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app"
             RELEASES_DIR="$APP_ROOT/releases"
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
@@ -105,23 +115,28 @@ jobs:
             echo "🚀 Starting Deployment: $TIMESTAMP"
             mkdir -p $RELEASES_DIR
 
-            # 2. SAVE PREVIOUS VERSION PATH
-            # We use 'readlink' but check if it's a real directory
-            PREVIOUS_RELEASE=$(readlink -f $CURRENT_SYMLINK)
-            if [ "$PREVIOUS_RELEASE" == "$CURRENT_SYMLINK" ] || [ ! -d "$PREVIOUS_RELEASE" ]; then
-                PREVIOUS_RELEASE=""
-                echo "ℹ️ No valid previous release found. This might be the first deploy."
-            fi
-
-            # 3. UNPACK THE LATEST TARBALL ONLY
-            mkdir -p $NEW_RELEASE_PATH
-            # FIX: We find the most RECENTLY uploaded tar file only
-            LATEST_TAR=$(ls -t $APP_ROOT/*.tar.gz | head -1)
+            # Check if file arrived
+            echo "🔎 Files in $APP_ROOT:"
+            ls -F $APP_ROOT
+            
+            LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
             
             if [ -z "$LATEST_TAR" ]; then
-                echo "❌ Error: No tarball found in $APP_ROOT"
+                echo "❌ Error: No file starting with 'app-' found in $APP_ROOT"
                 exit 1
             fi
+            # 3. UNPACK THE LATEST TARBALL ONLY
+              echo "📂 Current Directory: $(pwd)"
+              echo "🔎 Files in $APP_ROOT:"
+              ls -F $APP_ROOT  # This will print every file so you can see what is there
+              
+              LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
+              
+              if [ -z "$LATEST_TAR" ]; then
+                  echo "❌ Error: No file starting with 'app-' found in $APP_ROOT"
+                  echo "💡 TIP: Check your 'scp' step in GitHub Actions to ensure it's uploading to the right path."
+                  exit 1
+              fi
 
             echo "📦 Extracting $LATEST_TAR to $NEW_RELEASE_PATH"
             tar -xzf "$LATEST_TAR" -C "$NEW_RELEASE_PATH"
