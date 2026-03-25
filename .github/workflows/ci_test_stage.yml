@@ -189,7 +189,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send email
-        uses: dawidd/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v3
         with:
           # Server settings
           server_address: smtp.gmail.com
