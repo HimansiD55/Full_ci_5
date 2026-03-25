@@ -180,38 +180,52 @@ jobs:
             fi
       
   notify:
-      needs: [lint, test, build, deploy]
-      if: always()
-      runs-on: ubuntu-latest
-      steps:
+    # ⚠️ CRITICAL: You must include all jobs here so their 'result' is accessible
+    needs: [lint, test, build, deploy]
+    if: always() # This ensures email sends even if deploy fails
+    runs-on: ubuntu-latest
+    steps:
       - name: Send email
-        uses:  dawidd6/action-send-mail@v3
+        uses: dawidd/action-send-mail@v3
         with:
+          # Server settings
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
+          # Authentication (Saved in GitHub Secrets)
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
+          # Recipient
           to: ${{ secrets.EMAIL_TO }}
-          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+          from: GitHub Actions CI/CD
+          # Subject Logic
           subject: >
-            ${{
-              needs.deploy.result == 'success' && '[SUCCESS] Deploy' ||
-              needs.deploy.result == 'failure' && '[FAILED] Deploy — Rollback may have triggered' ||
-              '[CANCELLED] Deploy'
-            }} — ${{ github.repository }}
+            ${{ 
+              needs.deploy.result == 'success' && '✅ SUCCESS' || 
+              needs.deploy.result == 'failure' && '🚨 FAILED (Rollback Triggered)' || 
+              '⚠️ CANCELLED' 
+            }}: Deployment for ${{ github.repository }}
+          # Body Content
           body: |
-            Repository : ${{ github.repository }}
+            Hi Team,
+
+            A deployment was triggered for ${{ github.repository }}.
+
+            --- DEPLOYMENT SUMMARY ---
+            Status     : ${{ needs.deploy.result == 'success' && 'SUCCESSFUL' || 'FAILED' }}
             Branch     : ${{ github.ref_name }}
             Commit     : ${{ github.sha }}
-            Triggered  : ${{ github.actor }}
-            Lint   : ${{ needs.lint.result }}
+            Author     : ${{ github.actor }}
             
-            Test   : ${{ needs.test.result }}
-            Build  : ${{ needs.build.result }}
-            Deploy     : ${{ needs.deploy.result }}
-            
-            ${{ needs.deploy.result == 'failure' && 'NOTE: App was unstable. Automatic rollback was triggered inside deploy job.' || '' }}
+            --- JOB STATUS ---
+            Linting    : ${{ needs.lint.result }}
+            Testing    : ${{ needs.test.result }}
+            Building   : ${{ needs.build.result }}
+            Deploying  : ${{ needs.deploy.result }}
+
+            ${{ needs.deploy.result == 'failure' && '🛑 ALERT: The application was unstable after deployment. The system has automatically rolled back to the last stable version.' || '' }}
+
+            View Pipeline: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
             
             Pipeline   : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           
