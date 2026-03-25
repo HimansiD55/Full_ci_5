@@ -88,7 +88,7 @@ jobs:
         with:
           name: build-artifact
 
-      # STEP 1: UPLOAD THE FILE (Use scp-action)
+      # STEP 1: UPLOAD THE FILE
       - name: Copy artifact to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -98,7 +98,7 @@ jobs:
           source: "*.tar.gz"
           target: "/home/${{ secrets.SSH_USERNAME }}/app/"
 
-      # STEP 2: RUN THE DEPLOY SCRIPT (Use ssh-action)
+      # STEP 2: RUN THE DEPLOY SCRIPT
       - name: Deploy with Atomic Rollback
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -106,6 +106,7 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            # 1. SETUP VARIABLES
             APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app"
             RELEASES_DIR="$APP_ROOT/releases"
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
@@ -113,53 +114,40 @@ jobs:
             CURRENT_SYMLINK="$APP_ROOT/current"
 
             echo "🚀 Starting Deployment: $TIMESTAMP"
-            mkdir -p $RELEASES_DIR
+            mkdir -p "$RELEASES_DIR"
+            mkdir -p "$NEW_RELEASE_PATH"
 
-            # Check if file arrived
-            echo "🔎 Files in $APP_ROOT:"
-            ls -F $APP_ROOT
-            
+            # 2. SAVE PREVIOUS VERSION PATH (CRITICAL FOR ROLLBACK)
+            # This captures the 'Good' version BEFORE we change anything
+            PREVIOUS_RELEASE=$(readlink -f "$CURRENT_SYMLINK" || echo "")
+
+            # 3. UNPACK THE LATEST TARBALL
             LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
             
             if [ -z "$LATEST_TAR" ]; then
-                echo "❌ Error: No file starting with 'app-' found in $APP_ROOT"
+                echo "❌ Error: No tarball found in $APP_ROOT"
                 exit 1
             fi
-            # 3. UNPACK THE LATEST TARBALL ONLY
-              echo "📂 Current Directory: $(pwd)"
-              echo "🔎 Files in $APP_ROOT:"
-              ls -F $APP_ROOT  # This will print every file so you can see what is there
-              
-              LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
-              
-              if [ -z "$LATEST_TAR" ]; then
-                  echo "❌ Error: No file starting with 'app-' found in $APP_ROOT"
-                  echo "💡 TIP: Check your 'scp' step in GitHub Actions to ensure it's uploading to the right path."
-                  exit 1
-              fi
 
             echo "📦 Extracting $LATEST_TAR to $NEW_RELEASE_PATH"
             tar -xzf "$LATEST_TAR" -C "$NEW_RELEASE_PATH"
             
             echo "📦 Installing dependencies..."
-            cd $NEW_RELEASE_PATH
-            # Using --omit=dev as requested by your npm logs
+            cd "$NEW_RELEASE_PATH"
             npm install --omit=dev --no-audit --no-fund
 
             # 4. ATOMIC SWITCH
             echo "🔗 Switching Symlink..."
-            ln -sfn $NEW_RELEASE_PATH $CURRENT_SYMLINK
+            ln -sfn "$NEW_RELEASE_PATH" "$CURRENT_SYMLINK"
 
             # 5. RESTART APP
-            # We use the absolute path to index.js to ensure PM2 finds it
             echo "🚀 Starting/Restarting PM2..."
-            pm2 restart my-node-app || pm2 start $CURRENT_SYMLINK/index.js --name my-node-app
+            pm2 restart my-node-app || pm2 start "$CURRENT_SYMLINK/index.js" --name my-node-app
             
             # 6. HEALTH CHECK
             echo "⏳ Monitoring stability for 15 seconds..."
             sleep 15
 
-            # Updated parsing logic to be more resilient
             RESTARTS=$(pm2 jlist | node -e "
               try {
                 const data = JSON.parse(require('fs').readFileSync(0));
@@ -174,7 +162,7 @@ jobs:
                 echo "------------------------------------------------"
                 echo "✅ DEPLOYMENT SUCCESSFUL AT $(date)"
                 echo "------------------------------------------------"
-                # Cleanup: Keep only 5 releases, delete ALL tarballs to prevent the '*' error next time
+                # Keep only 5 releases, delete all tarballs
                 ls -dt $RELEASES_DIR/* | tail -n +6 | xargs rm -rf
                 rm -f $APP_ROOT/*.tar.gz
             else
@@ -182,7 +170,7 @@ jobs:
                 echo "🚨 ALERT: ROLLBACK TRIGGERED AT $(date)"
                 echo "------------------------------------------------"
                 
-                if [ -n "$PREVIOUS_RELEASE" ]; then
+                if [ -n "$PREVIOUS_RELEASE" ] && [ "$PREVIOUS_RELEASE" != "$NEW_RELEASE_PATH" ]; then
                     echo "🔄 Reverting Symlink to: $PREVIOUS_RELEASE"
                     ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_SYMLINK"
                     pm2 restart my-node-app
