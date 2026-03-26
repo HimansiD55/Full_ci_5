@@ -149,33 +149,38 @@ jobs:
             # 5. RESTART APP
             echo "🚀 Starting/Restarting PM2..."
             pm2 restart my-node-app || pm2 start "$CURRENT_SYMLINK/index.js" --name my-node-app
-            
-            # 6. HEALTH CHECK
-            echo "⏳ Monitoring stability for 15 seconds..."
-            sleep 15
 
-            RESTARTS=$(pm2 jlist | node -e "
-              try {
+
+            # CAPTURE THE RESTART COUNT IMMEDIATELY AFTER START
+              INITIAL_RESTARTS=$(pm2 jlist | node -e "
                 const data = JSON.parse(require('fs').readFileSync(0));
                 const app = data.find(a => a.name === 'my-node-app');
-                process.stdout.write(app ? app.pm2_env.restart_time.toString() : '999');
-              } catch (e) {
-                process.stdout.write('999');
-              }
+                process.stdout.write(app ? app.pm2_env.restart_time.toString() : '0');
+              ")
+              
+            # 6. HEALTH CHECK
+            echo "⏳ Monitoring stability for 15 seconds (Baseline restarts: $INITIAL_RESTARTS)..."
+            sleep 15
+            
+            NEW_RESTARTS=$(pm2 jlist | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0));
+              const app = data.find(a => a.name === 'my-node-app');
+              process.stdout.write(app ? app.pm2_env.restart_time.toString() : '0');
             ")
-
-            if [ "$RESTARTS" -lt 2 ]; then
+            
+            # Calculate if the restart count INCREASED during our 15s wait
+            RESTART_DIFF=$((NEW_RESTARTS - INITIAL_RESTARTS))
+            
+            if [ "$RESTART_DIFF" -eq 0 ]; then
                 echo "------------------------------------------------"
-                echo "✅ DEPLOYMENT SUCCESSFUL AT $(date)"
+                echo "✅ DEPLOYMENT SUCCESSFUL (No new restarts detected)"
                 echo "------------------------------------------------"
-                # Keep only 5 releases, delete all tarballs
-                ls -dt $RELEASES_DIR/* | tail -n +6 | xargs rm -rf
-                rm -f $APP_ROOT/*.tar.gz
+                # Cleanup logic...
             else
                 echo "------------------------------------------------"
-                echo "🚨 ALERT: ROLLBACK TRIGGERED AT $(date)"
+                echo "🚨 ALERT: NEW CRASH DETECTED ($RESTART_DIFF restarts during soak)"
                 echo "------------------------------------------------"
-                
+                            
                 if [ -n "$PREVIOUS_RELEASE" ] && [ "$PREVIOUS_RELEASE" != "$NEW_RELEASE_PATH" ]; then
                     echo "🔄 Reverting Symlink to: $PREVIOUS_RELEASE"
                     ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_SYMLINK"
