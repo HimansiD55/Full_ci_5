@@ -1,22 +1,52 @@
 # .github/workflows/security.yml
-name: Secret Scanning
+name: Secret Scanning & Auto-Lockdown
 
 on:
   pull_request:
-    branches: [main]
-
+    types: [opened, synchronize]
+ 
 jobs:
-  gitleaks:
+  scan-secrets:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # Required to close PR and comment
+
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history needed for scanning all commits
+          fetch-depth: 0 # Fetch all history so we can scan the whole PR
 
-      - name: Run gitleaks
+      - name: Run Gitleaks
+        id: gitleaks
         uses: gitleaks/gitleaks-action@v2
+        continue-on-error: true # We handle the failure manually below
+
+      - name: Lockdown PR & Notify via Gmail
+        if: steps.gitleaks.outputs.exit-code != 0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Scan only new commits in PR
-          GITLEAKS_ENABLE_COMMENTS: true
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 1. Post comment and Close PR
+          gh pr comment ${{ github.event.pull_request.number }} --body "🚨 **SECURITY ALERT:** Secrets detected. This PR has been closed automatically for safety."
+          gh pr close ${{ github.event.pull_request.number }}
+
+      - name: Send Email Notification
+        if: steps.gitleaks.outputs.exit-code != 0
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "🚨 SECURITY ALERT: Secret leaked in ${{ github.repository }}"
+          to: ${{ secrets.REPO_OWNER_EMAIL }},${{ github.event.pull_request.user.login }}@users.noreply.github.com
+          from: "GitHub Security Guard"
+          body: |
+            A secret was detected in a Pull Request for ${{ github.repository }}.
+            
+            Action Taken: PR #${{ github.event.pull_request.number }} has been automatically CLOSED.
+            PR Author: ${{ github.event.pull_request.user.login }}
+            
+            Please check the GitHub Action logs and rotate any leaked credentials immediately.
