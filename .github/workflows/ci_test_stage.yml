@@ -106,6 +106,12 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 20 --silent
+
+            
             # 1. SETUP VARIABLES
             APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app"
             RELEASES_DIR="$APP_ROOT/releases"
