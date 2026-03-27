@@ -23,8 +23,37 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
-      #  continue-on-error: true # We handle the failure manually below
+        continue-on-error: true # We handle the failure manually below
+      
+      - name: Lockdown PR & Notify via Comment
+        if: steps.gitleaks.outcome == 'failure'   # ✅ Correct condition
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ✅ Use built-in token
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "🚨 **SECURITY ALERT:** Secrets detected. This PR has been closed automatically for safety."
+          gh pr close ${{ github.event.pull_request.number }}
 
+      - name: Send Email Notification
+        if: steps.gitleaks.outcome == 'failure'   # ✅ Correct condition
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 SECURITY ALERT: Secret leaked in ${{ github.repository }}"
+          to: ${{ secrets.REPO_OWNER_EMAIL }}     # ✅ Removed noreply address
+          from: "GitHub Security Guard"
+          body: |
+            A secret was detected in a Pull Request for ${{ github.repository }}.
+
+            Action Taken: PR #${{ github.event.pull_request.number }} has been automatically CLOSED.
+            PR Author: ${{ github.event.pull_request.user.login }}
+            Branch: ${{ github.event.pull_request.head.ref }}
+            Commit: ${{ github.event.pull_request.head.sha }}
+
+            Please check the GitHub Action logs and rotate any leaked credentials immediately.
       
 
      
