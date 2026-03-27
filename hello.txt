@@ -1,2 +1,4 @@
 hi this is himansi
 
+AWS_SECRET_ACCESS_KEY="AKIA1234567890EXAMPLE"
+password="my_super_secret_password"
