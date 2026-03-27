@@ -26,7 +26,7 @@ jobs:
       - name: Lockdown PR & Notify via Gmail
         if: steps.gitleaks.outputs.exit-code != 0
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           # 1. Post comment and Close PR
           gh pr comment ${{ github.event.pull_request.number }} --body "🚨 **SECURITY ALERT:** Secrets detected. This PR has been closed automatically for safety."
