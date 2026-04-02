@@ -26,6 +26,10 @@ jobs:
       - name: Run Lint
         run: npm run lint
 
+  matrix-test:
+    name: Run Tests (Matrix)
+    needs: lint   # 👈 works here
+    uses: ./.github/workflows/test-matrix.yml
 
   test:
     runs-on: ubuntu-latest
