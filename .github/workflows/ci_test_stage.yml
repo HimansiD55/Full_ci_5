@@ -66,8 +66,8 @@ jobs:
         run: |
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           ARTIFACT_NAME="app-${SHORT_SHA}.tar.gz"
-          mkdir build
-          cp -r index.js package.json  build/
+          mkdir -p build
+          cp -r index.js package.json package-lock.json build/
 
           cd build
           tar -czf ../$ARTIFACT_NAME .
