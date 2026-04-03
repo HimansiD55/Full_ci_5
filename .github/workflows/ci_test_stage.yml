@@ -5,12 +5,12 @@ on:
     branches: [ main ]
   pull_request:
   workflow_dispatch:
-  
+
 jobs:
 
+  # ------------------ LINT ------------------
   lint:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -26,74 +26,130 @@ jobs:
       - name: Run Lint
         run: npm run lint
 
+
+  # ------------------ MATRIX TEST ------------------
   matrix-test:
     name: Run Tests (Matrix)
-    needs: lint   # 👈 works here
+    needs: lint
     uses: ./.github/workflows/test-matrix.yml
 
+
+  # ------------------ TEST ------------------
   test:
     runs-on: ubuntu-latest
-    needs: lint   # 🔗 runs only if lint passes
-
+    needs: lint
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run Tests
-        run: npm test
+      - run: npm install
+      - run: npm test
 
 
+  # ------------------ BUILD ------------------
   build:
     runs-on: ubuntu-latest
-    needs: test   # 🔗 runs only if test passes
-
+    needs: [test, matrix-test]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Install dependencies
-        run: npm ci
-        
+      - run: npm ci
+
       - name: Create artifact
         run: |
-           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
-           ARTIFACT_NAME="app-${SHORT_SHA}.tar.gz"
-           tar -czf $ARTIFACT_NAME node_modules index.js package.json
-           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
-           
-      - name: Upload artifect
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+          ARTIFACT_NAME="app-${SHORT_SHA}.tar.gz"
+          tar -czf $ARTIFACT_NAME node_modules index.js package.json
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-             name: build-artifact
-             path: ${{ env.ARTIFACT_NAME }}
-          
-      - name: Print artifact name
-        run: 'echo "✅ Created artifact: $ARTIFACT_NAME"'
+          name: build-artifact
+          path: ${{ env.ARTIFACT_NAME }}
 
-  deploy:
+      - run: 'echo "✅ Created artifact: $ARTIFACT_NAME"'
+
+
+  # ------------------ DEPLOY STAGING ------------------
+  deploy-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: build
+
+    environment:
+      name: staging   # ✅ auto deploy
+
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: build-artifact
 
-      # STEP 1: UPLOAD THE FILE
-      - name: Copy artifact to server
+      - name: Copy artifact to STAGING server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "*.tar.gz"
+          target: "/home/${{ secrets.SSH_USERNAME }}/app-staging/"
+
+      - name: Deploy to STAGING
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "🚀 Deploying to STAGING..."
+
+            APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app-staging"
+
+            mkdir -p "$APP_ROOT"
+
+            # Find latest artifact
+            LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
+           
+            if [ -z "$LATEST_TAR" ]; then
+              echo "❌ No tarball found"
+              exit 1
+            fi
+            echo "📦 Extracting $LATEST_TAR"
+            tar -xzf "$LATEST_TAR" -C "$APP_ROOT"
+
+            cd "$APP_ROOT"
+
+            echo "📦 Installing dependencies..."
+            npm install --omit=dev
+
+            echo "🚀 Starting STAGING app..."
+            pm2 restart staging-app || pm2 start index.js --name staging-app
+
+
+  # ------------------ DEPLOY PRODUCTION ------------------
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    environment:
+      name: production   # ⛔ manual approval required
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifact
+
+      - name: Copy artifact to PRODUCTION server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_IP }}
@@ -102,7 +158,6 @@ jobs:
           source: "*.tar.gz"
           target: "/home/${{ secrets.SSH_USERNAME }}/app/"
 
-      # STEP 2: RUN THE DEPLOY SCRIPT
       - name: Deploy with Atomic Rollback
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -115,8 +170,6 @@ jobs:
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             nvm use 20 --silent
 
-            
-            # 1. SETUP VARIABLES
             APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app"
             RELEASES_DIR="$APP_ROOT/releases"
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
@@ -127,123 +180,93 @@ jobs:
             mkdir -p "$RELEASES_DIR"
             mkdir -p "$NEW_RELEASE_PATH"
 
-            # 2. SAVE PREVIOUS VERSION PATH (CRITICAL FOR ROLLBACK)
-            # This captures the 'Good' version BEFORE we change anything
             PREVIOUS_RELEASE=$(readlink -f "$CURRENT_SYMLINK" || echo "")
 
-            # 3. UNPACK THE LATEST TARBALL
             LATEST_TAR=$(ls -t $APP_ROOT/app-*.tar.gz 2>/dev/null | head -1)
-            
+
             if [ -z "$LATEST_TAR" ]; then
-                echo "❌ Error: No tarball found in $APP_ROOT"
+                echo "❌ No tarball found"
                 exit 1
             fi
 
-            echo "📦 Extracting $LATEST_TAR to $NEW_RELEASE_PATH"
             tar -xzf "$LATEST_TAR" -C "$NEW_RELEASE_PATH"
-            
-            echo "📦 Installing dependencies..."
             cd "$NEW_RELEASE_PATH"
             npm install --omit=dev --no-audit --no-fund
 
-            # 4. ATOMIC SWITCH
-            echo "🔗 Switching Symlink..."
             ln -sfn "$NEW_RELEASE_PATH" "$CURRENT_SYMLINK"
 
-            # 5. RESTART APP
-            echo "🚀 Starting/Restarting PM2..."
             pm2 restart my-node-app || pm2 start "$CURRENT_SYMLINK/index.js" --name my-node-app
 
+            INITIAL_RESTARTS=$(pm2 jlist | node -e "
+              const data = JSON.parse(require('fs').readFileSync(0));
+              const app = data.find(a => a.name === 'my-node-app');
+              process.stdout.write(app ? app.pm2_env.restart_time.toString() : '0');
+            ")
 
-            # CAPTURE THE RESTART COUNT IMMEDIATELY AFTER START
-              INITIAL_RESTARTS=$(pm2 jlist | node -e "
-                const data = JSON.parse(require('fs').readFileSync(0));
-                const app = data.find(a => a.name === 'my-node-app');
-                process.stdout.write(app ? app.pm2_env.restart_time.toString() : '0');
-              ")
-              
-            # 6. HEALTH CHECK
-            echo "⏳ Monitoring stability for 15 seconds (Baseline restarts: $INITIAL_RESTARTS)..."
             sleep 15
-            
+
             NEW_RESTARTS=$(pm2 jlist | node -e "
               const data = JSON.parse(require('fs').readFileSync(0));
               const app = data.find(a => a.name === 'my-node-app');
               process.stdout.write(app ? app.pm2_env.restart_time.toString() : '0');
             ")
-            
-            # Calculate if the restart count INCREASED during our 15s wait
+
             RESTART_DIFF=$((NEW_RESTARTS - INITIAL_RESTARTS))
-            
+
             if [ "$RESTART_DIFF" -eq 0 ]; then
-                echo "------------------------------------------------"
-                echo "✅ DEPLOYMENT SUCCESSFUL (No new restarts detected)"
-                echo "------------------------------------------------"
-                # Cleanup logic...
+                echo "✅ DEPLOYMENT SUCCESSFUL"
             else
-                echo "------------------------------------------------"
-                echo "🚨 ALERT: NEW CRASH DETECTED ($RESTART_DIFF restarts during soak)"
-                echo "------------------------------------------------"
-                            
+                echo "🚨 CRASH DETECTED - ROLLBACK"
+
                 if [ -n "$PREVIOUS_RELEASE" ] && [ "$PREVIOUS_RELEASE" != "$NEW_RELEASE_PATH" ]; then
-                    echo "🔄 Reverting Symlink to: $PREVIOUS_RELEASE"
                     ln -sfn "$PREVIOUS_RELEASE" "$CURRENT_SYMLINK"
                     pm2 restart my-node-app
-                    echo "✅ ROLLBACK COMPLETE: Reverted to previous stable version."
+                    echo "✅ ROLLBACK COMPLETE"
                 else
-                    echo "❌ ROLLBACK FAILED: No previous stable release to return to!"
                     pm2 stop my-node-app || true
                 fi
                 exit 1
             fi
-      
+
+
+  # ------------------ NOTIFY ------------------
   notify:
-    # ⚠️ CRITICAL: You must include all jobs here so their 'result' is accessible
-    needs: [lint, test, build, deploy]
-    if: always() # This ensures email sends even if deploy fails
+    needs: [lint, test, build, deploy-staging, deploy-production]
+    if: always()
     runs-on: ubuntu-latest
+
     steps:
       - name: Send email
         uses: dawidd6/action-send-mail@v3
         with:
-          # Server settings
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
-          # Authentication (Saved in GitHub Secrets)
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          # Recipient
+
           to: ${{ secrets.EMAIL_TO }}
           from: GitHub Actions CI/CD
-          # Subject Logic
+
           subject: >
             ${{ 
-              needs.deploy.result == 'success' && '✅ SUCCESS' || 
-              needs.deploy.result == 'failure' && '🚨 FAILED (Rollback Triggered)' || 
+              needs.deploy-production.result == 'success' && '✅ SUCCESS' || 
+              needs.deploy-production.result == 'failure' && '🚨 FAILED (Rollback)' || 
               '⚠️ CANCELLED' 
             }}: Deployment for ${{ github.repository }}
-          # Body Content
+
           body: |
-            Hi Team,
+            Deployment Summary:
 
-            A deployment was triggered for ${{ github.repository }}.
+            Status: ${{ needs.deploy-production.result }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
 
-            --- DEPLOYMENT SUMMARY ---
-            Status     : ${{ needs.deploy.result == 'success' && 'SUCCESSFUL' || 'FAILED' }}
-            Branch     : ${{ github.ref_name }}
-            Commit     : ${{ github.sha }}
-            Author     : ${{ github.actor }}
-            
-            --- JOB STATUS ---
-            Linting    : ${{ needs.lint.result }}
-            Testing    : ${{ needs.test.result }}
-            Building   : ${{ needs.build.result }}
-            Deploying  : ${{ needs.deploy.result }}
+            Lint: ${{ needs.lint.result }}
+            Test: ${{ needs.test.result }}
+            Build: ${{ needs.build.result }}
+            Staging: ${{ needs.deploy-staging.result }}
+            Production: ${{ needs.deploy-production.result }}
 
-            ${{ needs.deploy.result == 'failure' && '🛑 ALERT: The application was unstable after deployment. The system has automatically rolled back to the last stable version.' || '' }}
-
-            View Pipeline: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            
-            Pipeline   : https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          
+            Pipeline:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
