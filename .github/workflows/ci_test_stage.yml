@@ -67,10 +67,10 @@ jobs:
           SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
           ARTIFACT_NAME="app-${SHORT_SHA}.tar.gz"
           mkdir build
-          cp -r index.js package.json node_modules build/
+          cp -r index.js package.json  build/
 
           cd build
-          tar -czf $ARTIFACT_NAME .
+          tar -czf ../$ARTIFACT_NAME .
           cd ..
           
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
@@ -128,16 +128,20 @@ jobs:
               echo "❌ No tarball found"
               exit 1
             fi
+           
+            echo "🧹 Cleaning old files..."
+            rm -rf "$APP_ROOT"/*
+            
             echo "📦 Extracting $LATEST_TAR"
             tar -xzf "$LATEST_TAR" -C "$APP_ROOT"
 
             cd "$APP_ROOT"
 
             echo "📦 Installing dependencies..."
-            npm install --omit=dev
+            npm install --omit=dev --no-audit --no-fund
 
             echo "🚀 Starting STAGING app..."
-            pm2 restart staging-app || pm2 start index.js --name staging-app
+            PORT=3001 pm2 restart staging-app || PORT=3001 pm2 start index.js --name staging-app
 
 
   # ------------------ DEPLOY PRODUCTION ------------------
