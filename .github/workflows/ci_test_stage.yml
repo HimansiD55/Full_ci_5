@@ -128,12 +128,18 @@ jobs:
               echo "❌ No tarball found"
               exit 1
             fi
-           
+            echo "📦 Found artifact: $LATEST_TAR"
+
+            # 👉 Move tar to temp location
+            mv "$LATEST_TAR" /tmp/
+            
             echo "🧹 Cleaning old files..."
             rm -rf "$APP_ROOT"/*
             
+            # 👉 Move it back
+            mv /tmp/$(basename "$LATEST_TAR") "$APP_ROOT"/
             echo "📦 Extracting $LATEST_TAR"
-            tar -xzf "$LATEST_TAR" -C "$APP_ROOT"
+            tar -xzf "$APP_ROOT/$(basename "$LATEST_TAR")" -C "$APP_ROOT"
 
             cd "$APP_ROOT"
 
