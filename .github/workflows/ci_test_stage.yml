@@ -116,9 +116,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "🚀 Deploying to STAGING..."
-
+            
+            # 1. Load Node.js environment (Crucial!)
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            nvm use 20 --silent
+            
             APP_ROOT="/home/${{ secrets.SSH_USERNAME }}/app-staging"
-
             mkdir -p "$APP_ROOT"
 
             # Find latest artifact
@@ -147,8 +151,8 @@ jobs:
             npm install --omit=dev --no-audit --no-fund
 
             echo "🚀 Starting STAGING app..."
-            PORT=3001 pm2 restart staging-app || PORT=3001 pm2 start index.js --name staging-app
 
+            PORT=3001 pm2 restart staging-app --update-env || PORT=3001 pm2 start index.js --name staging-app
 
   # ------------------ DEPLOY PRODUCTION ------------------
   deploy-production:
